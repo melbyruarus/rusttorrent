@@ -9,7 +9,11 @@ use rusttorrent::support::*;
 use std::thread;
 
 fn main() {
-	let stream = TcpStream::connect("127.0.0.1:54004").unwrap();
+	let addr = "127.0.0.1:54004";
+	let stream = match TcpStream::connect(addr) {
+		Ok(s) => s,
+		Err(e) => panic!("Couldn't connect to {}, got {}", addr, e)
+	};
 	let stream_clone = stream.try_clone().unwrap();
 
 	let manager = SocketManager::start::<TcpStream, TcpStream>(stream, stream_clone);
