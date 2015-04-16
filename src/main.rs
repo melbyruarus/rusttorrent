@@ -6,9 +6,10 @@ use std::net::TcpStream;
 use std::str::FromStr;
 use rusttorrent::messages::*;
 use rusttorrent::support::*;
+use std::thread;
 
 fn main() {
-	let stream = TcpStream::connect("127.0.0.1:8080").unwrap(); //54004
+	let stream = TcpStream::connect("127.0.0.1:54004").unwrap();
 	let stream_clone = stream.try_clone().unwrap();
 
 	let manager = SocketManager::start::<TcpStream, TcpStream>(stream, stream_clone);
@@ -20,4 +21,28 @@ fn main() {
 									PeerId::from_str("RT097378612376745896").ok().unwrap()));
 	manager.send(Message::Unchoke);
 	manager.send(Message::Interested);
+
+	thread::scoped(move || {
+		match manager.recv() {
+			Ok(message) => {
+				match message {
+					Message::Handshake(protocol, extensions, info_hash, peer_id) => {
+						println!("Handshake({:?}, {:?}, {:?}, {:?}", protocol, extensions, info_hash, peer_id);
+					},
+					_ => {
+						println!("Unexpected message {:?}", message);
+						return;
+					}
+				}
+			}
+			Err(err) => {
+				println!("Error listening for data {:?}", err);
+				return;
+			}
+		}
+
+		for message in manager.recv_iter() {
+			println!("{:?}", message);
+		}
+	});
 }

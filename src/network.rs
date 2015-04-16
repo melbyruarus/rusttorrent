@@ -1,8 +1,7 @@
 use std;
 use std::io;
 
-extern crate byteorder;
-use self::byteorder::{ByteOrder, BigEndian};
+use super::convert::*;
 
 pub struct Packet {
 	data: Vec<u8>
@@ -14,11 +13,12 @@ impl Packet {
 	}
 
 	pub fn length_prefixed_string(self, string: &str) -> Packet {
-		if string.len() > std::u8::MAX as usize {
-			panic!("string too long");
-		}
+		let len = match string.len().to_u8() {
+			Some(val) => val,
+			None => panic!("string too long")
+		};
 
-		self.byte(string.len() as u8).string(string)
+		self.byte(len).string(string)
 	}
 
 	pub fn string(self, string: &str) -> Packet {
@@ -42,10 +42,7 @@ impl Packet {
 	}
 
 	pub fn u32(self, val: u32) -> Packet {
-		let mut buf = [0; 4];
-		<BigEndian as ByteOrder>::write_u32(&mut buf, val);
-
-		self.bytes(&buf)
+		self.bytes(&val.to_bytes_be())
 	}
 
 	pub fn byte(mut self, val: u8) -> Packet {
