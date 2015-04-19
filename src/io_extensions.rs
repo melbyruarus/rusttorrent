@@ -8,10 +8,7 @@ pub fn read_exact<T: io::Read>(stream: &mut T, buffer: &mut [u8], amount: usize)
 		// TODO: Only care about second half
 		let (_, sliced) = buffer.split_at_mut(amount_read);
 
-		amount_read += match stream.read(sliced) {
-			Ok(size) => size,
-			Err(err) => return Err(err)
-		};
+		amount_read += try!(stream.read(sliced));
 	}
 
 	Ok(amount_read)
