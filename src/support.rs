@@ -20,6 +20,11 @@ fn to_fixed_size_hash_bytes(bytes: &[u8]) -> [u8; 20] {
 	new_bytes
 }
 
+pub enum Timeout<T> {
+	Ok(T),
+	Timeout
+}
+
 
 
 bitflags!(
@@ -33,6 +38,18 @@ impl Extensions {
 	pub fn to_bytes(&self) -> [u8; 8] {
 		[0,0,0,0,0,0,0,0]
 	}
+}
+
+#[derive(Hash, Eq, PartialEq, Debug)]
+pub struct BlockRequest {
+	pub start: BlockBegin,
+	pub length: u32
+}
+
+#[derive(Hash, Eq, PartialEq, Debug)]
+pub struct BlockBegin {
+	pub piece: u32,
+	pub offset: u32
 }
 
 #[derive(Debug)]
@@ -52,17 +69,16 @@ pub struct InfoHashParseError {
 	_priv: ()
 }
 
+#[derive(Copy, Clone)]
 pub struct InfoHash {
-	pub bytes: [u8; 20],
-	pub string: String
+	pub bytes: [u8; 20]
 }
 
 impl InfoHash {
 	pub fn from_bytes(val: &[u8]) -> Option<InfoHash> {
 		if val.len() == 20 {
 			Some(InfoHash {
-				bytes: to_fixed_size_hash_bytes(val),
-				string: val.to_hex()
+				bytes: to_fixed_size_hash_bytes(val)
 			})
 		}
 		else {
@@ -73,7 +89,13 @@ impl InfoHash {
 
 impl std::fmt::Debug for InfoHash {
 	fn fmt(&self, formatter: &mut std::fmt::Formatter) -> Result<(), std::fmt::Error> {
-		self.string.fmt(formatter)
+		self.to_string().fmt(formatter)
+	}
+}
+
+impl std::string::ToString for InfoHash {
+	fn to_string(&self) -> String {
+		self.bytes.to_hex()
 	}
 }
 
@@ -85,9 +107,6 @@ impl FromStr for InfoHash {
 			return Err(InfoHashParseError { _priv: ()});
 		}
 
-		let mut string = String::new();
-		string.push_str(val);
-
 		match val.from_hex() {
 			Ok(as_vec) => {
 				if as_vec.len() != 20 {
@@ -95,7 +114,6 @@ impl FromStr for InfoHash {
 				}
 
 				Ok(InfoHash {
-					string: string,
 					bytes: to_fixed_size_hash_bytes(&as_vec[0..20])
 				})
 			}
@@ -110,25 +128,22 @@ pub struct PeerIdParseError {
 	_priv: ()
 }
 
+#[derive(Copy, Clone)]
 pub struct PeerId {
-	pub bytes: [u8; 20],
-	pub string: String
+	pub bytes: [u8; 20]
 }
 
 impl PeerId {
 	pub fn from_bytes(bytes: &[u8]) -> Option<PeerId> {
 		if bytes.len() == 20 {
-			let parsed_string = match std::str::from_utf8(&bytes) {
-				Ok(val) => val,
-				Err(_) => return None
+			// Check whether this will parse, as we use this in to_string()
+			match std::str::from_utf8(&bytes) {
+				Err(_) => return None,
+				_ => ()
 			};
 
-			let mut string = String::new();
-			string.push_str(parsed_string);
-
 			Some(PeerId {
-				bytes: to_fixed_size_hash_bytes(bytes),
-				string: string
+				bytes: to_fixed_size_hash_bytes(bytes)
 			})
 		}
 		else {
@@ -139,7 +154,14 @@ impl PeerId {
 
 impl std::fmt::Debug for PeerId {
 	fn fmt(&self, formatter: &mut std::fmt::Formatter) -> Result<(), std::fmt::Error> {
-		self.string.fmt(formatter)
+		self.to_string().fmt(formatter)
+	}
+}
+
+impl std::string::ToString for PeerId {
+	fn to_string(&self) -> String {
+		// This should never panic, because we have a check in from_bytes()
+		std::string::String::from_utf8(self.bytes.to_vec()).ok().unwrap()
 	}
 }
 
@@ -151,9 +173,6 @@ impl FromStr for PeerId {
 			return Err(PeerIdParseError { _priv: ()});
 		}
 
-		let mut string = String::new();
-		string.push_str(val);
-
 		let as_bytes = val.as_bytes();
 
 		let mut bytes = [0; 20];
@@ -162,7 +181,6 @@ impl FromStr for PeerId {
 		}
 
 		Ok(PeerId {
-			string: string,
 			bytes: bytes
 		})
 	}

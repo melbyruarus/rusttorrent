@@ -1,5 +1,6 @@
 use std::io;
 
+// TODO: Can you implement a trait for a trait?
 pub fn read_exact<T: io::Read>(stream: &mut T, buffer: &mut [u8], amount: usize) -> io::Result<usize> {
 	assert!(buffer.len() >= amount);
 
