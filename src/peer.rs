@@ -14,7 +14,13 @@ pub struct Peer {
 	pub send_channel: Sender<Message>,
 	pub receive_channel: Receiver<Message>,
 	pub peer_id: PeerId,
-	pub internal_connection_id: u32
+	pub internal_connection_id: u32,
+	pub upload_rate_to_us: u32,
+	pub download_rate_from_us: u32,
+	pub is_interested: bool,
+	pub is_choking: bool,
+	pub am_interested: bool,
+	pub am_choking: bool
 }
 
 // impl Eq for Peer {
@@ -76,6 +82,12 @@ pub fn connect<A: net::ToSocketAddrs>(addr: A, info_hash: InfoHash, peer_id: Pee
 		send_channel: send,
 		receive_channel: receive,
 		peer_id: peer_id,
-		internal_connection_id: internal_connection_id
+		internal_connection_id: internal_connection_id,
+		upload_rate_to_us: 0,
+		download_rate_from_us: 0,
+		is_interested: false,
+		is_choking: true,
+		am_interested: false,
+		am_choking: true
 	})
 }

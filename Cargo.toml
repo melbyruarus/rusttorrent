@@ -6,3 +6,4 @@ authors = ["Melby Ruarus <melby@ruarus.co.nz>"]
 [dependencies]
 rustc-serialize = "0.3"
 byteorder = "*"
+rand = "*"
