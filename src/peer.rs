@@ -1,18 +1,18 @@
 use std::io;
 use std::net;
 use std::thread;
-use std::sync::mpsc::{Sender,Receiver};
-// use std::hash::{Hash, Hasher};
 
 use std::str::FromStr;
+
+use comm::spsc::unbounded::{self, Producer, Consumer};
 
 use super::messages::{self, Message};
 use super::support::*;
 use super::mpsc_extensions::*;
 
 pub struct Peer {
-	pub send_channel: Sender<Message>,
-	pub receive_channel: Receiver<Message>,
+	pub send_channel: Producer<Message>,
+	pub receive_channel: Consumer<Message>,
 	pub peer_id: PeerId,
 	pub internal_connection_id: u32,
 	pub upload_rate_to_us: u32,
@@ -22,25 +22,6 @@ pub struct Peer {
 	pub am_interested: bool,
 	pub am_choking: bool
 }
-
-// impl Eq for Peer {
-// }
-
-// impl PartialEq for Peer {
-// 	fn eq(&self, other: &Self) -> bool {
-// 		self.internal_connection_id == other.internal_connection_id
-// 	}
-
-//     fn ne(&self, other: &Self) -> bool {
-//     	!self.eq(other)
-//     }
-// }
-
-// impl Hash for Peer {
-// 	fn hash<H>(&self, state: &mut H) where H: Hasher {
-// 		self.internal_connection_id.hash(state)
-// 	}
-// }
 
 pub fn connect<A: net::ToSocketAddrs>(addr: A, info_hash: InfoHash, peer_id: PeerId, timeout: u32, internal_connection_id: u32) -> Option<Peer> {
 	let stream = match net::TcpStream::connect(addr) {

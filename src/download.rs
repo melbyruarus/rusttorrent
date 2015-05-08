@@ -1,24 +1,22 @@
-extern crate rand;
-
-use self::rand::Rng;
+use rand::{self, Rng};
+use comm::select::{Select, Selectable};
+use comm::endpoint::Consumer;
+use comm;
 
 use std::net;
-// use std::collections::HashSet;
 
 use super::peer::{self, Peer};
 use super::support::*;
 use super::timer;
 use super::messages::Message;
 
-// TODO: Temporary
-use std::sync::mpsc::Select;
-
 pub struct Downloader {
 	info_hash: InfoHash,
 	peer_id: PeerId,
 	peers: Vec<Peer>,
 	internal_connection_counter: u32,
-	choke_algorithm_counter: u8
+	choke_algorithm_counter: u8,
+	select: Select
 }
 
 pub fn new(info_hash: InfoHash, peer_id: PeerId) -> Downloader {
@@ -27,7 +25,8 @@ pub fn new(info_hash: InfoHash, peer_id: PeerId) -> Downloader {
 		peer_id: peer_id,
 		peers: Vec::new(),
 		internal_connection_counter: 0,
-		choke_algorithm_counter: 0
+		choke_algorithm_counter: 0,
+		select: Select::new()
 	}
 }
 
@@ -37,8 +36,29 @@ impl Downloader {
 		self.internal_connection_counter += 1;
 
 		match peer::connect(addr, self.info_hash, self.peer_id, 30000, internal_connection_id) {
-			Some(peer) => {self.peers.push(peer);},
+			Some(peer) => {
+				self.select.add(&peer.receive_channel);
+				self.peers.push(peer)
+			},
 			None => ()
+		}
+	}
+
+	fn receive_peer_message(&self, id: usize) -> Option<Result<Message, comm::Error>> {
+		let mut ready_peer: Option<&Peer> = None;
+
+		for peer in self.peers.iter() {
+			if id == peer.receive_channel.id() {
+				ready_peer = Some(peer);
+				break;
+			}
+		}
+
+		if let Some(peer) = ready_peer {
+			Some(peer.receive_channel.recv_sync())
+		}
+		else {
+			None
 		}
 	}
 
@@ -46,42 +66,29 @@ impl Downloader {
 		println!("{:?}", self.peers.len());
 
 		let choke_algorithm_timer = timer::repeating(10000);
+		self.select.add(&choke_algorithm_timer);
 
 		loop {
-			// TODO: Figure out a much nicer way to do select statements
-			let select = Select::new();
+			let id = self.select.wait(&mut [0])[0];
 
-			let mut peer_handle_id = 0;
-			let mut choke_algorithm_timer_handle_id = 0;
-
-			let mut result_id = 0;
-
-			{
-				let mut peer_handle = select.handle(&self.peers[0].receive_channel);
-				peer_handle_id = peer_handle.id();
-				let mut choke_algorithm_timer_handle = select.handle(&choke_algorithm_timer);
-				choke_algorithm_timer_handle_id = choke_algorithm_timer_handle.id();
-
-				unsafe {
-					peer_handle.add();
-					choke_algorithm_timer_handle.add();
+			if let Some(result) = self.receive_peer_message(id) {
+				match result {
+					Ok(message) => self.process_peer_message(message),
+					Err(_) => {
+						// TODO: remove peer?
+					}
 				}
-
-				let peer_id = peer_handle.id();
-				let choke_algorithm_timer_handle_id = choke_algorithm_timer_handle.id();
-
-				result_id = select.wait();
 			}
-
-			if result_id == peer_handle_id {
-				println!("got: {:?}", self.peers[0].receive_channel.recv());
-			}
-			else if result_id == choke_algorithm_timer_handle_id {
-				choke_algorithm_timer.recv();
-				
+			else if id == choke_algorithm_timer.id() {
+				let _ = choke_algorithm_timer.recv_sync();
 				self.run_choke_algorithm();
+				continue;
 			}
 		}
+	}
+
+	fn process_peer_message(&mut self, message: Message) {
+		println!("got: {:?}", message);
 	}
 
 	fn run_choke_algorithm(&mut self) {

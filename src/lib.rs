@@ -1,5 +1,8 @@
 #![feature(std_misc)]
 
+extern crate rand;
+extern crate comm;
+
 mod macros;
 pub mod network;
 pub mod messages;

@@ -3,10 +3,12 @@ use super::network::*;
 use super::convert::*;
 use super::io_extensions::*;
 use super::timer;
+use super::mpsc_extensions::*;
+
+use comm::spsc::unbounded::{self, Producer, Consumer};
 
 use std;
 use std::thread::{self, JoinGuard};
-use std::sync::mpsc::{channel, Sender, Receiver, SendError};
 use std::io;
 
 use std::iter::repeat;
@@ -27,12 +29,12 @@ pub enum Message {
 	Close
 }
 
-pub fn create_message_pair<S: 'static + io::Write + Send, R: 'static + io::Read + Send>(mut sending_socket: S, mut listening_socket: R) -> (Sender<Message>, Receiver<Message>) {
-	let (client_send, server_listen) = channel::<Message>();
-	let (server_send, client_listen) = channel::<Message>();
+pub fn create_message_pair<S: 'static + io::Write + Send, R: 'static + io::Read + Send>(mut sending_socket: S, mut listening_socket: R) -> (Producer<Message>, Consumer<Message>) {
+	let (client_send, server_listen) = unbounded::new();
+	let (server_send, client_listen) = unbounded::new();
 
 	thread::spawn(move || {
-		for to_send in server_listen.iter() {
+		for to_send in recv_iter(&server_listen) {
 	    	match to_send {
 	    		Message::Close => {
 	    			break
@@ -77,7 +79,7 @@ pub fn create_message_pair<S: 'static + io::Write + Send, R: 'static + io::Read 
 					break;
 	    		}
 	    	}
-	    	
+
 	    	let message_length = match u32::from_bytes_be(& length_buffer).to_usize() {
 	    		Some(length) => length,
 	    		None => {
@@ -264,7 +266,7 @@ fn write_message<T: io::Write + Send>(message: Message, socket: &mut T) -> io::R
 				Some(size) => size,
 				None => panic!("packet too large")
 			};
-			
+
 			Packet::new()
 				.u32(length)
 				.byte(7)
