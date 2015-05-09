@@ -1,10 +1,6 @@
-use std::io;
 use std::net;
-use std::thread;
 
-use std::str::FromStr;
-
-use comm::spsc::unbounded::{self, Producer, Consumer};
+use comm::spsc::unbounded::{Producer, Consumer};
 
 use super::messages::{self, Message};
 use super::support::*;
@@ -39,7 +35,8 @@ pub fn connect<A: net::ToSocketAddrs>(addr: A, info_hash: InfoHash, peer_id: Pee
 	let protocol = Protocol::BitTorrent;
 	let extensions = NONE;
 
-	send.send(Message::Handshake(protocol, extensions, info_hash, peer_id));
+	// TODO: Deal with write errors
+	let _ = send.send(Message::Handshake(protocol, extensions, info_hash, peer_id));
 
    	match recv_with_timeout(&receive, timeout) {
 		Timeout::Ok(result) => match result {
@@ -53,7 +50,7 @@ pub fn connect<A: net::ToSocketAddrs>(addr: A, info_hash: InfoHash, peer_id: Pee
 				}
 			}
 			// TODO: Log?
-			Err(err) =>  return None
+			Err(_) =>  return None
 		},
 		// TODO: Log?
 		Timeout::Timeout =>  return None

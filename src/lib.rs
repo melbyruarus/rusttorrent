@@ -1,5 +1,3 @@
-#![feature(std_misc)]
-
 extern crate rand;
 extern crate comm;
 

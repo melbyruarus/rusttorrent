@@ -2,13 +2,12 @@ use super::support::*;
 use super::network::*;
 use super::convert::*;
 use super::io_extensions::*;
-use super::timer;
 use super::mpsc_extensions::*;
 
 use comm::spsc::unbounded::{self, Producer, Consumer};
 
 use std;
-use std::thread::{self, JoinGuard};
+use std::thread;
 use std::io;
 
 use std::iter::repeat;
@@ -60,11 +59,18 @@ pub fn create_message_pair<S: 'static + io::Write + Send, R: 'static + io::Read 
 
 		// Read handshake
 		let mut handshake_buffer = [0; 68];
-		read_exact(&mut listening_socket, &mut handshake_buffer, 68);
+		match read_exact(&mut listening_socket, &mut handshake_buffer, 68) {
+			Ok(_) => (),
+			Err(err) => {
+				// TODO: Is this what we want to do on errors?
+				println!("error reading from socket {:?}", err);
+				return;
+			}
+		}
 
 		// Unpack handshake
-		// TODO: deal with read errors
-    	server_send.send(read_handshake(&handshake_buffer).ok().unwrap());
+		// TODO: deal with read & write errors
+    	let _ = server_send.send(read_handshake(&handshake_buffer).ok().unwrap());
 
 		// Listen for normal messages
 
@@ -72,7 +78,7 @@ pub fn create_message_pair<S: 'static + io::Write + Send, R: 'static + io::Read 
 	    loop {
 	    	// Read length
 	    	match read_exact(&mut listening_socket, &mut length_buffer, 4) {
-	    		Ok(usize) => (),
+	    		Ok(_) => (),
 	    		Err(err) => {
 	    			// TODO: Is this what we want to do on errors?
 					println!("error reading from socket {:?}", err);
@@ -96,7 +102,7 @@ pub fn create_message_pair<S: 'static + io::Write + Send, R: 'static + io::Read 
 
 	    	// Read message
 	    	match read_exact(&mut listening_socket, &mut message_buffer, message_length) {
-	    		Ok(usize) => (),
+	    		Ok(_) => (),
 	    		Err(err) => {
 	    			// TODO: Is this what we want to do on errors?
 					println!("error reading from socket {:?}", err);
@@ -105,8 +111,8 @@ pub fn create_message_pair<S: 'static + io::Write + Send, R: 'static + io::Read 
 	    	}
 
 	    	// We now have the whole message, parse it into a Message enum
-	    	// TODO: deal with read errors
-	    	server_send.send(read_message(message_buffer).ok().unwrap());
+	    	// TODO: deal with read & write errors
+			let _ = server_send.send(read_message(message_buffer).ok().unwrap());
 	    }
 
 	    println!("closing receive connection")
@@ -125,7 +131,7 @@ fn read_handshake(bytes: &[u8; 68]) -> Result<Message, ()> {
 
 	let protocol = match std::str::from_utf8(&bytes[1..20]) {
 		Ok(string) => string,
-		Err(err) => return Err(())
+		Err(_) => return Err(())
 	};
 
 	if Protocol::BitTorrent.to_string() != protocol {

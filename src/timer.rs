@@ -5,7 +5,8 @@ pub fn oneshot(ms: u32) -> one_space::Consumer<()> {
 	let (tx, rx) = one_space::new();
     thread::spawn(move || {
         thread::sleep_ms(ms);
-        tx.send(());
+		// Ignore response
+        let _ = tx.send(());
     });
     rx
 }
@@ -15,7 +16,10 @@ pub fn repeating(ms: u32) -> ring_buf::Consumer<()> {
     thread::spawn(move || {
     	loop {
 	        thread::sleep_ms(ms);
-	        tx.send(());
+	        match tx.send(()) {
+				Err(_) => break, // Stop as soon as the other side is closed
+				_ => ()
+			}
 	    }
     });
     rx

@@ -158,13 +158,15 @@ impl Downloader {
 		for index in indexes_to_unchoke {
 			let peer = &mut self.peers[index];
 			peer.am_choking = false;
-			peer.send_channel.send(Message::Unchoke);
+			// TODO: Deal with write errors
+			let _ = peer.send_channel.send(Message::Unchoke);
 		}
 
 		for index in indexes_to_choke {
 			let peer = &mut self.peers[index];
 			peer.am_choking = true;
-			peer.send_channel.send(Message::Choke);
+			// TODO: Deal with write errors
+			let _ = peer.send_channel.send(Message::Choke);
 		}
 	}
 }

@@ -5,13 +5,11 @@ extern crate rustc_serialize as serialize;
 use self::serialize::hex::FromHex;
 use self::serialize::hex::ToHex;
 
-use super::macros;
-
 
 
 fn to_fixed_size_hash_bytes(bytes: &[u8]) -> [u8; 20] {
 	assert!(bytes.len() == 20);
-	
+
 	let mut new_bytes = [0; 20];
 	for i in 0..20 {
 		new_bytes[i] = bytes[i];
