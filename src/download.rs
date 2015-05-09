@@ -85,6 +85,7 @@ impl Downloader {
 			}
 			else {
 				println!("unknown channel in select response");
+				break
 			}
 		}
 	}
@@ -113,7 +114,7 @@ impl Downloader {
 							peer.pieces.set(piece_count_usize, true);
 						}
 						else {
-							println!("Invalid `have` piece index {}", piece)
+							println!("Invalid `have` piece index {}", piece);
 							return true // Disconnect
 						}
 					}
