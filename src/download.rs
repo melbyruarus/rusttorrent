@@ -114,6 +114,7 @@ impl Downloader {
 						}
 						else {
 							println!("Invalid `have` piece index {}", piece)
+							return true // Disconnect
 						}
 					}
 					Message::Bitfield(bitvec_) => {
@@ -138,7 +139,6 @@ impl Downloader {
 						}
 						else {
 							println!("Invalid bitvec length {}", bitvec.len());
-
 							return true // Disconnect
 						}
 					}
