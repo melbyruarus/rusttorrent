@@ -9,6 +9,7 @@ use comm::spsc::unbounded::{self, Producer, Consumer};
 use std;
 use std::thread;
 use std::io;
+use std::collections::BitVec;
 
 use std::iter::repeat;
 
@@ -21,7 +22,7 @@ pub enum Message {
 	Interested,
 	NotInterested,
 	Have(u32),
-	Bitfield(Vec<u8>),
+	Bitfield(BitVec), // Note that the bitfield may be padded out to the nearest byte
 	Request(BlockRequest),
 	Piece(BlockBegin, Vec<u8>),
 	Cancel(BlockRequest),
@@ -115,6 +116,8 @@ pub fn create_message_pair<S: 'static + io::Write + Send, R: 'static + io::Read 
 			let _ = server_send.send(read_message(message_buffer).ok().unwrap());
 	    }
 
+		// TODO: deal with read & write errors
+		let _ = server_send.send(Message::Close);
 	    println!("closing receive connection")
 	});
 
@@ -173,7 +176,7 @@ fn read_message(bytes: Vec<u8>) -> Result<Message, ()> {
 
 			Ok(Message::Have(u32::from_bytes_be(&bytes[1..5])))
 		}
-		5 => Ok(Message::Bitfield(bytes[1..bytes.len()].to_vec())),
+		5 => Ok(Message::Bitfield(BitVec::from_bytes(&bytes[1..bytes.len()]))),
 		6 => {
 			assert!(bytes.len() == 13);
 
@@ -257,7 +260,7 @@ fn write_message<T: io::Write + Send>(message: Message, socket: &mut T) -> io::R
 			Packet::new()
 				.u32(length)
 				.byte(5)
-				.bytes_vec(bits)
+				.bytes_vec(&bits.to_bytes())
 		}
 		Message::Request(request) => {
 			Packet::new()

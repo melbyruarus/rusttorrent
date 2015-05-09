@@ -7,10 +7,12 @@ use std::net;
 use super::peer::{self, Peer};
 use super::support::*;
 use super::timer;
+use super::convert::*;
 use super::messages::Message;
 
 pub struct Downloader {
 	info_hash: InfoHash,
+	piece_count: u32,
 	peer_id: PeerId,
 	peers: Vec<Peer>,
 	internal_connection_counter: u32,
@@ -18,9 +20,10 @@ pub struct Downloader {
 	select: Select
 }
 
-pub fn new(info_hash: InfoHash, peer_id: PeerId) -> Downloader {
+pub fn new(info_hash: InfoHash, piece_count: u32, peer_id: PeerId) -> Downloader {
 	Downloader {
 		info_hash: info_hash,
+		piece_count: piece_count,
 		peer_id: peer_id,
 		peers: Vec::new(),
 		internal_connection_counter: 0,
@@ -34,13 +37,18 @@ impl Downloader {
 		let internal_connection_id = self.internal_connection_counter;
 		self.internal_connection_counter += 1;
 
-		match peer::connect(addr, self.info_hash, self.peer_id, 30000, internal_connection_id) {
+		match peer::connect(addr, self.info_hash, self.piece_count, self.peer_id, 30000, internal_connection_id) {
 			Some(peer) => {
 				self.select.add(&peer.receive_channel);
 				self.peers.push(peer)
 			},
 			None => ()
 		}
+	}
+
+	fn remove_peer(&mut self, peer_index: usize) {
+		self.select.remove(&self.peers[peer_index].receive_channel);
+		self.peers.remove(peer_index);
 	}
 
 	fn peer_index_for_channel_id(&self, id: usize) -> Option<usize> {
@@ -67,16 +75,21 @@ impl Downloader {
 			let id = self.select.wait(&mut [0])[0];
 
 			if let Some(peer_index) = self.peer_index_for_channel_id(id) {
-				self.process_peer_message_for_index(peer_index);
+				if self.process_peer_message_for_index(peer_index) {
+					self.remove_peer(peer_index);
+				}
 			}
 			else if id == choke_algorithm_timer.id() {
 				let _ = choke_algorithm_timer.recv_sync();
 				self.run_choke_algorithm();
 			}
+			else {
+				println!("unknown channel in select response");
+			}
 		}
 	}
 
-	fn process_peer_message_for_index(&mut self, peer_index: usize) {
+	fn process_peer_message_for_index(&mut self, peer_index: usize) -> bool {
 		let peer = &mut self.peers[peer_index];
 
 		match peer.receive_channel.recv_sync() {
@@ -85,23 +98,63 @@ impl Downloader {
 
 				match message {
 					Message::KeepAlive => (),
-					Message::Handshake(_, _, _, _) => (), // Should never happen
+					Message::Handshake(_, _, _, _) => (), // Should never happen, so ignore
 					Message::Choke => peer.is_choking = true,
 					Message::Unchoke => peer.is_choking = false,
 					Message::Interested => peer.is_interested = true,
 					Message::NotInterested => peer.is_interested = false,
-					Message::Have(_) => (), // TODO: Implement
-					Message::Bitfield(_) => (), // TODO: Implement
+					Message::Have(piece) => {
+						if piece < self.piece_count {
+							let piece_count_usize = match self.piece_count.to_usize() {
+								Some(s) => s,
+								None => return true // Disconnect
+							};
+
+							peer.pieces.set(piece_count_usize, true);
+						}
+						else {
+							println!("Invalid `have` piece index {}", piece)
+						}
+					}
+					Message::Bitfield(bitvec_) => {
+						let mut bitvec = bitvec_;
+
+						let piece_count_usize = match self.piece_count.to_usize() {
+							Some(s) => s,
+							None => return true // Disconnect
+						};
+
+						let mut next_byte_multiple = (piece_count_usize / 8) * 8;
+						if next_byte_multiple != piece_count_usize {
+							next_byte_multiple += 8;
+						}
+
+						if bitvec.len() > piece_count_usize && bitvec.len() == next_byte_multiple {
+							bitvec.truncate(piece_count_usize);
+						}
+
+						if bitvec.len() == piece_count_usize {
+							peer.pieces = bitvec;
+						}
+						else {
+							println!("Invalid bitvec length {}", bitvec.len());
+
+							return true // Disconnect
+						}
+					}
 					Message::Request(_) => (), // TODO: Implement
 					Message::Piece(_, _) => (), // TODO: Implement
 					Message::Cancel(_) => (), // TODO: Implement
-					Message::Close => (), // TODO: Implement
+					Message::Close => return true // Disconnect
 				}
 			}
-			Err(_) => {
-				// TODO: remove peer?
+			Err(err) => {
+				println!("Error reading from peer receive channel ({:?})", err);
+				return true
 			}
 		}
+
+		false
 	}
 
 	fn run_choke_algorithm(&mut self) {

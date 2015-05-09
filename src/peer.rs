@@ -1,9 +1,11 @@
 use std::net;
+use std::collections::BitVec;
 
 use comm::spsc::unbounded::{Producer, Consumer};
 
 use super::messages::{self, Message};
 use super::support::*;
+use super::convert::*;
 use super::mpsc_extensions::*;
 
 pub struct Peer {
@@ -16,10 +18,16 @@ pub struct Peer {
 	pub is_interested: bool,
 	pub is_choking: bool,
 	pub am_interested: bool,
-	pub am_choking: bool
+	pub am_choking: bool,
+	pub pieces: BitVec
 }
 
-pub fn connect<A: net::ToSocketAddrs>(addr: A, info_hash: InfoHash, peer_id: PeerId, timeout: u32, internal_connection_id: u32) -> Option<Peer> {
+pub fn connect<A: net::ToSocketAddrs>(addr: A, info_hash: InfoHash, piece_count: u32, peer_id: PeerId, timeout: u32, internal_connection_id: u32) -> Option<Peer> {
+	let piece_count_usize = match piece_count.to_usize() {
+		Some(s) => s,
+		None => return None
+	};
+
 	let stream = match net::TcpStream::connect(addr) {
 		Ok(s) => s,
 		Err(_) => return None
@@ -66,6 +74,7 @@ pub fn connect<A: net::ToSocketAddrs>(addr: A, info_hash: InfoHash, peer_id: Pee
 		is_interested: false,
 		is_choking: true,
 		am_interested: false,
-		am_choking: true
+		am_choking: true,
+		pieces: BitVec::from_elem(piece_count_usize, false)
 	})
 }
