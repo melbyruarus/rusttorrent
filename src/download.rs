@@ -1,7 +1,6 @@
 use rand::{self, Rng};
 use comm::select::{Select, Selectable};
 use comm::endpoint::Consumer;
-use comm;
 
 use std::net;
 
@@ -44,22 +43,18 @@ impl Downloader {
 		}
 	}
 
-	fn receive_peer_message(&self, id: usize) -> Option<Result<Message, comm::Error>> {
-		let mut ready_peer: Option<&Peer> = None;
+	fn peer_index_for_channel_id(&self, id: usize) -> Option<usize> {
+		let mut index = 0;
 
 		for peer in self.peers.iter() {
 			if id == peer.receive_channel.id() {
-				ready_peer = Some(peer);
-				break;
+				return Some(index)
 			}
+
+			index += 1;
 		}
 
-		if let Some(peer) = ready_peer {
-			Some(peer.receive_channel.recv_sync())
-		}
-		else {
-			None
-		}
+		None
 	}
 
 	pub fn start(&mut self) {
@@ -71,24 +66,42 @@ impl Downloader {
 		loop {
 			let id = self.select.wait(&mut [0])[0];
 
-			if let Some(result) = self.receive_peer_message(id) {
-				match result {
-					Ok(message) => self.process_peer_message(message),
-					Err(_) => {
-						// TODO: remove peer?
-					}
-				}
+			if let Some(peer_index) = self.peer_index_for_channel_id(id) {
+				self.process_peer_message_for_index(peer_index);
 			}
 			else if id == choke_algorithm_timer.id() {
 				let _ = choke_algorithm_timer.recv_sync();
 				self.run_choke_algorithm();
-				continue;
 			}
 		}
 	}
 
-	fn process_peer_message(&mut self, message: Message) {
-		println!("got: {:?}", message);
+	fn process_peer_message_for_index(&mut self, peer_index: usize) {
+		let peer = &mut self.peers[peer_index];
+
+		match peer.receive_channel.recv_sync() {
+			Ok(message) => {
+				println!("got: {:?}", message);
+
+				match message {
+					Message::KeepAlive => (),
+					Message::Handshake(_, _, _, _) => (), // Should never happen
+					Message::Choke => peer.is_choking = true,
+					Message::Unchoke => peer.is_choking = false,
+					Message::Interested => peer.is_interested = true,
+					Message::NotInterested => peer.is_interested = false,
+					Message::Have(_) => (), // TODO: Implement
+					Message::Bitfield(_) => (), // TODO: Implement
+					Message::Request(_) => (), // TODO: Implement
+					Message::Piece(_, _) => (), // TODO: Implement
+					Message::Cancel(_) => (), // TODO: Implement
+					Message::Close => (), // TODO: Implement
+				}
+			}
+			Err(_) => {
+				// TODO: remove peer?
+			}
+		}
 	}
 
 	fn run_choke_algorithm(&mut self) {
