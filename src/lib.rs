@@ -13,3 +13,4 @@ pub mod mpsc_extensions;
 pub mod peer;
 pub mod download;
 pub mod timer;
+pub mod piece_selection;

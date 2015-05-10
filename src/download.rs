@@ -9,6 +9,7 @@ use super::support::*;
 use super::timer;
 use super::convert::*;
 use super::messages::Message;
+use super::piece_selection::{self, PieceSelector};
 
 pub struct Downloader {
 	info_hash: InfoHash,
@@ -17,18 +18,21 @@ pub struct Downloader {
 	peers: Vec<Peer>,
 	internal_connection_counter: u32,
 	choke_algorithm_counter: u8,
-	select: Select
+	select: Select,
+	// TODO: Re-add peices when they have failed to download
+	piece_selector: Box<PieceSelector>
 }
 
-pub fn new(info_hash: InfoHash, piece_count: u32, peer_id: PeerId) -> Downloader {
+pub fn new(info_hash: InfoHash, piece_count: u32, piece_size: u32, peer_id: PeerId) -> Downloader {
 	Downloader {
 		info_hash: info_hash,
 		piece_count: piece_count,
 		peer_id: peer_id,
-		peers: Vec::new(),
+		peers: vec!(),
 		internal_connection_counter: 0,
 		choke_algorithm_counter: 0,
-		select: Select::new()
+		select: Select::new(),
+		piece_selector: piece_selection::new_sequential_selector(piece_count, piece_size, 16384)
 	}
 }
 
@@ -75,9 +79,7 @@ impl Downloader {
 			let id = self.select.wait(&mut [0])[0];
 
 			if let Some(peer_index) = self.peer_index_for_channel_id(id) {
-				if self.process_peer_message_for_index(peer_index) {
-					self.remove_peer(peer_index);
-				}
+				self.process_peer_message_for_index(peer_index);
 			}
 			else if id == choke_algorithm_timer.id() {
 				let _ = choke_algorithm_timer.recv_sync();
@@ -90,72 +92,126 @@ impl Downloader {
 		}
 	}
 
-	fn process_peer_message_for_index(&mut self, peer_index: usize) -> bool {
-		let peer = &mut self.peers[peer_index];
+	fn process_peer_message_for_index(&mut self, peer_index: usize) {
+		let mut should_update_requests = false;
+		let mut should_remove_peer = false;
 
-		match peer.receive_channel.recv_sync() {
-			Ok(message) => {
-				println!("got: {:?}", message);
+		// TODO: This feels very wrong, re-architect so this works better
+		'outer: for _ in 0..1 { // So we have somewhere easy to jump to
+			let peer = &mut self.peers[peer_index];
 
-				match message {
-					Message::KeepAlive => (),
-					Message::Handshake(_, _, _, _) => (), // Should never happen, so ignore
-					Message::Choke => peer.is_choking = true,
-					Message::Unchoke => peer.is_choking = false,
-					Message::Interested => peer.is_interested = true,
-					Message::NotInterested => peer.is_interested = false,
-					Message::Have(piece) => {
-						if piece < self.piece_count {
+			match peer.receive_channel.recv_sync() {
+				Ok(message) => {
+					println!("got: {:?}", message);
+
+					match message {
+						Message::KeepAlive => (),
+						Message::Handshake(_, _, _, _) => (), // Should never happen, so ignore
+						Message::Choke => {
+							peer.is_choking = true;
+
+							// TODO: Clear out any in-flight requests, we will never see them satisfied
+						}
+						Message::Unchoke => {
+							peer.is_choking = false;
+
+							should_update_requests = true;
+						}
+						Message::Interested => {
+							peer.is_interested = true;
+
+							// TODO: Implement
+						}
+						Message::NotInterested => {
+							peer.is_interested = false;
+
+							// TODO: Implement
+						}
+						Message::Have(piece) => {
+							if piece < self.piece_count {
+								let piece_count_usize = match self.piece_count.to_usize() {
+									Some(s) => s,
+									None => {
+										// Disconnect
+										should_remove_peer = true;
+										break 'outer;
+									}
+								};
+
+								peer.pieces.set(piece_count_usize, true);
+							}
+							else {
+								println!("Invalid `have` piece index {}", piece);
+								// Disconnect
+								should_remove_peer = true;
+								break 'outer;
+							}
+						}
+						Message::Bitfield(bitvec_) => {
+							let mut bitvec = bitvec_;
+
 							let piece_count_usize = match self.piece_count.to_usize() {
 								Some(s) => s,
-								None => return true // Disconnect
+								None => {
+									// Disconnect
+									should_remove_peer = true;
+									break 'outer;
+								}
 							};
 
-							peer.pieces.set(piece_count_usize, true);
+							let mut next_byte_multiple = (piece_count_usize / 8) * 8;
+							if next_byte_multiple != piece_count_usize {
+								next_byte_multiple += 8;
+							}
+
+							if bitvec.len() > piece_count_usize && bitvec.len() == next_byte_multiple {
+								bitvec.truncate(piece_count_usize);
+							}
+
+							if bitvec.len() == piece_count_usize {
+								peer.pieces = bitvec;
+							}
+							else {
+								println!("Invalid bitvec length {}", bitvec.len());
+								// Disconnect
+								should_remove_peer = true;
+								break 'outer;
+							}
 						}
-						else {
-							println!("Invalid `have` piece index {}", piece);
-							return true // Disconnect
+						Message::Request(_) => (), // TODO: Implement
+						Message::Piece(_, _) => {
+							// TODO: Implement
+
+							if peer.inflight_requests > 0 {
+								peer.inflight_requests -= 1;
+							}
+
+							should_update_requests = true;
+						}
+						Message::Cancel(_) => (), // TODO: Implement
+						Message::Close => {
+							// Disconnect
+							should_remove_peer = true;
+							break 'outer;
 						}
 					}
-					Message::Bitfield(bitvec_) => {
-						let mut bitvec = bitvec_;
-
-						let piece_count_usize = match self.piece_count.to_usize() {
-							Some(s) => s,
-							None => return true // Disconnect
-						};
-
-						let mut next_byte_multiple = (piece_count_usize / 8) * 8;
-						if next_byte_multiple != piece_count_usize {
-							next_byte_multiple += 8;
-						}
-
-						if bitvec.len() > piece_count_usize && bitvec.len() == next_byte_multiple {
-							bitvec.truncate(piece_count_usize);
-						}
-
-						if bitvec.len() == piece_count_usize {
-							peer.pieces = bitvec;
-						}
-						else {
-							println!("Invalid bitvec length {}", bitvec.len());
-							return true // Disconnect
-						}
-					}
-					Message::Request(_) => (), // TODO: Implement
-					Message::Piece(_, _) => (), // TODO: Implement
-					Message::Cancel(_) => (), // TODO: Implement
-					Message::Close => return true // Disconnect
 				}
-			}
-			Err(err) => {
-				println!("Error reading from peer receive channel ({:?})", err);
-				return true
+				Err(err) => {
+					println!("Error reading from peer receive channel ({:?})", err);
+					// Disconnect
+					should_remove_peer = true;
+					break 'outer;
+				}
 			}
 		}
 
-		false
+		if should_update_requests {
+			self.update_requests(peer_index)
+		}
+
+		if should_remove_peer {
+			self.remove_peer(peer_index)
+		}
 	}
 
 	fn run_choke_algorithm(&mut self) {
@@ -234,6 +290,37 @@ impl Downloader {
 			peer.am_choking = true;
 			// TODO: Deal with write errors
 			let _ = peer.send_channel.send(Message::Choke);
+		}
+	}
+
+	// TODO: When the piece_selector re-adds a block we will need to asign it to a peer
+	fn update_requests(&mut self, peer_index: usize) {
+		let peer = &mut self.peers[peer_index];
+
+		if !peer.is_choking {
+			// TODO: 100 should not be the number, this needs some smarts to deal with different connection
+			// speeds, http://lists.ibiblio.org/pipermail/bittorrent/2007-August/002126.html has a discussion
+			while peer.inflight_requests < 100 {
+				if let Some(request) = self.piece_selector.next_request() {
+					if !peer.am_interested {
+						peer.am_interested = true; // TODO: set to false somewhere
+
+						peer.send_channel.send(Message::Interested);
+					}
+
+					println!("requesting: {:?}", request);
+
+					peer.send_channel.send(Message::Request(request));
+
+					peer.inflight_requests += 1;
+				}
+				else {
+					break
+				}
+			}
+		}
+		else {
+			println!("update_requests while peer is choking");
 		}
 	}
 }

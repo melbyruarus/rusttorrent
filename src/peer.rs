@@ -8,6 +8,7 @@ use super::support::*;
 use super::convert::*;
 use super::mpsc_extensions::*;
 
+// TODO: This has too much state, should be split across multiple structs. Should just have send/receve/id etc
 pub struct Peer {
 	pub send_channel: Producer<Message>,
 	pub receive_channel: Consumer<Message>,
@@ -19,7 +20,9 @@ pub struct Peer {
 	pub is_choking: bool,
 	pub am_interested: bool,
 	pub am_choking: bool,
-	pub pieces: BitVec
+	pub pieces: BitVec,
+	pub inflight_requests: u32 // TODO: use something more sophisticated, e.g. actually track requests
+							   // so we can determine if they are correct, and what they were when we disconnect the peer
 }
 
 pub fn connect<A: net::ToSocketAddrs>(addr: A, info_hash: InfoHash, piece_count: u32, peer_id: PeerId, timeout: u32, internal_connection_id: u32) -> Option<Peer> {
@@ -75,6 +78,7 @@ pub fn connect<A: net::ToSocketAddrs>(addr: A, info_hash: InfoHash, piece_count:
 		is_choking: true,
 		am_interested: false,
 		am_choking: true,
-		pieces: BitVec::from_elem(piece_count_usize, false)
+		pieces: BitVec::from_elem(piece_count_usize, false),
+		inflight_requests: 0
 	})
 }
